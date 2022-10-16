@@ -215,3 +215,6 @@ pip-log.txt
 .mr.developer.cfg
 packages/
 .vs/
+
+# ignore nuget.config for auth with Github package repo
+nuget.config
