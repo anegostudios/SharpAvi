@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net60</TargetFrameworks>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+        <Version>3.0.0</Version>
+        <Authors>baSSiLL</Authors>
+        <Company/>
+        <Product>SharpAvi</Product>
+        <Description>A Motion JPEG video encoder for SharpAvi based on the SkiaSharp library.</Description>
+        <Copyright>Copyright © Vasili Maslov 2022</Copyright>
+        <PackageProjectUrl>https://github.com/baSSiLL/SharpAvi</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/baSSiLL/SharpAvi.git</RepositoryUrl>
+        <PackageTags>SharpAvi SkiaSharp AVI MJPG M-JPEG video</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RootNamespace>SharpAvi</RootNamespace>
+        <PackageReadmeFile>readme.md</PackageReadmeFile>
+        <AssemblyVersion>$(Version).0</AssemblyVersion>
+        <FileVersion>$(Version).0</FileVersion>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+        <PackageReleaseNotes>https://github.com/baSSiLL/SharpAvi/releases/tag/v$(Version)</PackageReleaseNotes>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="..\SharpAvi\Utilities\Argument.cs" Link="Utilities\Argument.cs"/>
+        <Compile Include="..\SharpAvi\Utilities\BitmapUtils.cs" Link="Utilities\BitmapUtils.cs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="readme.md">
+            <Pack>True</Pack>
+            <PackagePath>\</PackagePath>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\SharpAvi\SharpAvi.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="SkiaSharp" Version="2.88.3"/>
+    </ItemGroup>
+
+</Project>
