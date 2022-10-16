@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Windows.Threading;
-using System.Diagnostics.Contracts;
+﻿using SharpAvi.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace SharpAvi.Codecs
 {
@@ -14,19 +10,15 @@ namespace SharpAvi.Codecs
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Especially useful for unmanaged encoders like <see cref="Mpeg4VideoEncoderVcm"/> in multi-threaded scenarios
+    /// Especially useful for unmanaged encoders like <see cref="Mpeg4VcmVideoEncoder"/> in multi-threaded scenarios
     /// like asynchronous encoding.
-    /// </para>
-    /// <para>
-    /// Uses <see cref="Dispatcher"/> under the hood.
     /// </para>
     /// </remarks>
     public class SingleThreadedVideoEncoderWrapper : IVideoEncoder, IDisposable
     {
         private readonly IVideoEncoder encoder;
-        private readonly Thread thread;
-        private readonly Dispatcher dispatcher;
-        
+        private readonly SingleThreadTaskScheduler scheduler;
+
         /// <summary>
         /// Creates a new instance of <see cref="SingleThreadedVideoEncoderWrapper"/>.
         /// </summary>
@@ -36,22 +28,13 @@ namespace SharpAvi.Codecs
         /// </param>
         public SingleThreadedVideoEncoderWrapper(Func<IVideoEncoder> encoderFactory)
         {
-            Contract.Requires(encoderFactory != null);
+            Argument.IsNotNull(encoderFactory, nameof(encoderFactory));
 
-            this.thread = new Thread(RunDispatcher)
-                {
-                    IsBackground = true,
-                    Name = typeof(SingleThreadedVideoEncoderWrapper).Name
-                };
-            var dispatcherCreated = new AutoResetEvent(false);
-            thread.Start(dispatcherCreated);
-            dispatcherCreated.WaitOne();
-            this.dispatcher = Dispatcher.FromThread(thread);
+            scheduler = new SingleThreadTaskScheduler();
 
             // TODO: Create encoder on the first frame
-            this.encoder = (IVideoEncoder)dispatcher.Invoke(encoderFactory);
-            if (encoder == null)
-                throw new InvalidOperationException("Encoder factory has created no instance.");
+            encoder = SchedulerInvoke(encoderFactory)
+                ?? throw new InvalidOperationException("Encoder factory has created no instance.");
         }
 
         /// <summary>
@@ -59,49 +42,28 @@ namespace SharpAvi.Codecs
         /// </summary>
         public void Dispose()
         {
-            if (thread.IsAlive)
+            if (!scheduler.IsDisposed)
             {
-                var encoderDisposable = encoder as IDisposable;
-                if (encoderDisposable != null)
+                if (encoder is IDisposable disposable)
                 {
-                    dispatcher.Invoke(new Action(encoderDisposable.Dispose));
+                    new Task(disposable.Dispose).RunSynchronously(scheduler);
                 }
-
-                dispatcher.InvokeShutdown();
-                thread.Join();
+                scheduler.Dispose();
             }
         }
 
         /// <summary>Codec ID.</summary>
-        public FourCC Codec
-        {
-            get
-            {
-                return (FourCC)dispatcher.Invoke(new Func<FourCC>(() => encoder.Codec));
-            }
-        }
+        public FourCC Codec => SchedulerInvoke(() => encoder.Codec);
 
         /// <summary>
         /// Number of bits per pixel in encoded image.
         /// </summary>
-        public BitsPerPixel BitsPerPixel
-        {
-            get
-            {
-                return (BitsPerPixel)dispatcher.Invoke(new Func<BitsPerPixel>(() => encoder.BitsPerPixel));
-            }
-        }
+        public BitsPerPixel BitsPerPixel => SchedulerInvoke(() => encoder.BitsPerPixel);
 
         /// <summary>
         /// Determines the amount of space needed in the destination buffer for storing the encoded data of a single frame.
         /// </summary>
-        public int MaxEncodedSize
-        {
-            get
-            {
-                return (int)dispatcher.Invoke(new Func<int>(() => encoder.MaxEncodedSize));
-            }
-        }
+        public int MaxEncodedSize => SchedulerInvoke(() => encoder.MaxEncodedSize);
 
         /// <summary>
         /// Wether to vertically flip the frame before writing
@@ -113,13 +75,12 @@ namespace SharpAvi.Codecs
         }
 
         /// <summary>
-        /// Encodes video frame.
+        /// Encodes a video frame.
         /// </summary>
         public int EncodeFrame(byte[] source, int srcOffset, byte[] destination, int destOffset, out bool isKeyFrame)
         {
-            var result = (EncodeResult)dispatcher.Invoke(
-                new Func<byte[], int, byte[], int, EncodeResult>(EncodeFrame), 
-                source, srcOffset, destination, destOffset);
+            var result = SchedulerInvoke(
+                () => EncodeFrame(source, srcOffset, destination, destOffset));
             isKeyFrame = result.IsKeyFrame;
             return result.EncodedLength;
         }
@@ -129,11 +90,45 @@ namespace SharpAvi.Codecs
             bool isKeyFrame;
             var result = encoder.EncodeFrame(source, srcOffset, destination, destOffset, out isKeyFrame);
             return new EncodeResult
-                {
-                    EncodedLength = result,
-                    IsKeyFrame = isKeyFrame
-                };
+            {
+                EncodedLength = result,
+                IsKeyFrame = isKeyFrame
+            };
         }
+
+#if NET5_0_OR_GREATER
+        /// <summary>
+        /// Encodes a video frame.
+        /// </summary>
+        public unsafe int EncodeFrame(ReadOnlySpan<byte> source, Span<byte> destination, out bool isKeyFrame)
+        {
+            EncodeResult result;
+            fixed (void* srcPtr = source, destPtr = destination)
+            {
+                var srcIntPtr = new IntPtr(srcPtr);
+                var srcLength = source.Length;
+                var destIntPtr = new IntPtr(destPtr);
+                var destLength = destination.Length;
+                result = SchedulerInvoke(
+                    () => EncodeFrame(srcIntPtr, srcLength, destIntPtr, destLength));
+            }
+            isKeyFrame = result.IsKeyFrame;
+            return result.EncodedLength;
+        }
+
+        private unsafe EncodeResult EncodeFrame(IntPtr source, int srcLength, IntPtr destination, int destLength)
+        {
+            bool isKeyFrame;
+            var sourceSpan = new Span<byte>(source.ToPointer(), srcLength);
+            var destSpan = new Span<byte>(destination.ToPointer(), destLength);
+            var result = encoder.EncodeFrame(sourceSpan, destSpan, out isKeyFrame);
+            return new EncodeResult
+            {
+                EncodedLength = result,
+                IsKeyFrame = isKeyFrame
+            };
+        }
+#endif
 
         private struct EncodeResult
         {
@@ -142,13 +137,11 @@ namespace SharpAvi.Codecs
         }
 
 
-        private void RunDispatcher(object parameter)
+        private TResult SchedulerInvoke<TResult>(Func<TResult> func)
         {
-            AutoResetEvent dispatcherCreated = (AutoResetEvent)parameter;
-            var dispatcher = Dispatcher.CurrentDispatcher;
-            dispatcherCreated.Set();
-
-            Dispatcher.Run();
+            var task = new Task<TResult>(func);
+            task.RunSynchronously(scheduler);
+            return task.Result;
         }
     }
 }

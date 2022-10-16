@@ -1,30 +1,22 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.IO;
-using System.Linq;
-using System.Text;
+﻿using SharpAvi.Utilities;
+using System;
 
 namespace SharpAvi.Output
 {
     internal abstract class AviStreamBase : IAviStream, IAviStreamInternal
     {
         private bool isFrozen;
-        private readonly int index;
         private string name;
         private FourCC chunkId;
 
         protected AviStreamBase(int index)
         {
-            Contract.Requires(index >= 0);
+            Argument.IsNotNegative(index, nameof(index));
 
-            this.index = index;
+            this.Index = index;
         }
 
-        public int Index
-        {
-            get { return index; }
-        }
+        public int Index { get; }
 
         public string Name
         {

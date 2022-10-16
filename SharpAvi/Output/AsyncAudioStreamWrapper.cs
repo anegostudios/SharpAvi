@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Linq;
-using System.Text;
-#if FX45
+﻿using SharpAvi.Utilities;
+using System;
 using System.Threading.Tasks;
-#endif
 
 namespace SharpAvi.Output
 {
@@ -19,30 +14,50 @@ namespace SharpAvi.Output
         public AsyncAudioStreamWrapper(IAviAudioStreamInternal baseStream)
             : base(baseStream)
         {
-            Contract.Requires(baseStream != null);
         }
 
         public override void WriteBlock(byte[] data, int startIndex, int length)
         {
+            Argument.IsNotNull(data, nameof(data));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= data.Length, "End offset exceeds the length of data.");
+
             writeInvoker.Invoke(() => base.WriteBlock(data, startIndex, length));
         }
 
-#if FX45
         public override Task WriteBlockAsync(byte[] data, int startIndex, int length)
         {
+            Argument.IsNotNull(data, nameof(data));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= data.Length, "End offset exceeds the length of data.");
+
             return writeInvoker.InvokeAsync(() => base.WriteBlock(data, startIndex, length));
         }
-#else
-        public override IAsyncResult BeginWriteBlock(byte[] data, int startIndex, int length, AsyncCallback userCallback, object stateObject)
+
+#if NET5_0_OR_GREATER
+        public unsafe override void WriteBlock(ReadOnlySpan<byte> data)
         {
-            return writeInvoker.BeginInvoke(
-                () => base.WriteBlock(data, startIndex, length), 
-                userCallback, stateObject);
+            Argument.Meets(data.Length > 0, nameof(data), "Cannot write an empty block.");
+
+            fixed (void* ptr = data)
+            {
+                var dataPtr = new IntPtr(ptr);
+                var dataLength = data.Length;
+                writeInvoker.Invoke(() =>
+                {
+                    var dataSpan = new Span<byte>(dataPtr.ToPointer(), dataLength);
+                    base.WriteBlock(dataSpan);
+                });
+            }
         }
 
-        public override void EndWriteBlock(IAsyncResult asyncResult)
+        public override Task WriteBlockAsync(ReadOnlyMemory<byte> data)
         {
-            writeInvoker.EndInvoke(asyncResult);
+            Argument.Meets(data.Length > 0, nameof(data), "Cannot write an empty block.");
+
+            return writeInvoker.InvokeAsync(() => base.WriteBlock(data.Span));
         }
 #endif
 

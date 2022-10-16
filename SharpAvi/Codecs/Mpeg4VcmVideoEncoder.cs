@@ -1,7 +1,8 @@
-﻿using System;
+﻿using SharpAvi.Format;
+using SharpAvi.Utilities;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -27,34 +28,49 @@ namespace SharpAvi.Codecs
     /// <see cref="SingleThreadedVideoEncoderWrapper"/> for the stable work.
     /// </para>
     /// </remarks>
-    public class Mpeg4VideoEncoderVcm : IVideoEncoder, IDisposable
+    public class Mpeg4VcmVideoEncoder : IVideoEncoder, IDisposable
     {
+        /// <summary>
+        /// Checks whether <see cref="Mpeg4VcmVideoEncoder"/> is supported on this platform.
+        /// </summary>
+        /// <returns><c>True</c> if supported, <c>false</c> otherwise.</returns>
+        public static bool IsSupported() => Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+        private static void CheckSupportedPlatform()
+        {
+            if (!IsSupported())
+            {
+                throw new PlatformNotSupportedException($"{nameof(Mpeg4VcmVideoEncoder)} is only supported on the Windows platform.");
+            }
+        }
+
         /// <summary>
         /// Default preferred order of the supported codecs.
         /// </summary>
-        public static ReadOnlyCollection<FourCC> DefaultCodecPreference
-        {
-            get { return defaultCodecPreference; }
-        }
-        private static readonly ReadOnlyCollection<FourCC> defaultCodecPreference =
-            new ReadOnlyCollection<FourCC>(
+        public static ReadOnlyCollection<FourCC> DefaultCodecPreference { get; } 
+            = new ReadOnlyCollection<FourCC>(
                 new[]
                 {
-                    KnownFourCCs.Codecs.MicrosoftMpeg4V3,
-                    KnownFourCCs.Codecs.MicrosoftMpeg4V2,
-                    KnownFourCCs.Codecs.Xvid,
-                    KnownFourCCs.Codecs.X264,
-                    KnownFourCCs.Codecs.DivX,
+                    CodecIds.MicrosoftMpeg4V3,
+                    CodecIds.MicrosoftMpeg4V2,
+                    CodecIds.Xvid,
+                    CodecIds.X264,
+                    CodecIds.DivX,
                 });
 
         /// <summary>
         /// Gets info about the supported codecs that are installed on the system.
         /// </summary>
+        /// <exception cref="PlatformNotSupportedException">
+        /// Running not on Windows.
+        /// </exception>
         public static CodecInfo[] GetAvailableCodecs()
         {
+            CheckSupportedPlatform();
+
             var result = new List<CodecInfo>();
 
-            var inBitmapInfo = CreateBitmapInfo(8, 8, 32, KnownFourCCs.Codecs.Uncompressed);
+            var inBitmapInfo = CreateBitmapInfo(8, 8, 32, CodecIds.Uncompressed);
             inBitmapInfo.ImageSize = (uint)4;
 
             foreach (var codec in DefaultCodecPreference)
@@ -115,7 +131,7 @@ namespace SharpAvi.Codecs
 
         private readonly int width;
         private readonly int height;
-        private byte[] sourceBuffer;
+        private readonly byte[] sourceBuffer;
         private readonly VfwApi.BitmapInfoHeader inBitmapInfo;
         private readonly VfwApi.BitmapInfoHeader outBitmapInfo;
         private readonly IntPtr compressorHandle;
@@ -132,7 +148,7 @@ namespace SharpAvi.Codecs
         private bool flipVertical = true;
 
         /// <summary>
-        /// Creates a new instance of <see cref="Mpeg4VideoEncoderVcm"/>.
+        /// Creates a new instance of <see cref="Mpeg4VcmVideoEncoder"/>.
         /// </summary>
         /// <param name="width">Frame width.</param>
         /// <param name="height">Frame height.</param>
@@ -151,6 +167,9 @@ namespace SharpAvi.Codecs
         /// <exception cref="InvalidOperationException">
         /// No compatible codec was found in the system.
         /// </exception>
+        /// <exception cref="PlatformNotSupportedException">
+        /// Running not on Windows.
+        /// </exception>
         /// <remarks>
         /// <para>
         /// It is not guaranteed that the codec will respect the specified <paramref name="quality"/> value.
@@ -162,19 +181,21 @@ namespace SharpAvi.Codecs
         /// the encoder is not guaranteed to work properly.
         /// </para>
         /// </remarks>
-        public Mpeg4VideoEncoderVcm(int width, int height, double fps, int frameCount, int quality, params FourCC[] codecPreference)
+        public Mpeg4VcmVideoEncoder(int width, int height, double fps, int frameCount, int quality, params FourCC[] codecPreference)
         {
-            Contract.Requires(width > 0);
-            Contract.Requires(height > 0);
-            Contract.Requires(fps > 0);
-            Contract.Requires(frameCount >= 0);
-            Contract.Requires(1 <= quality && quality <= 100);
+            Argument.IsPositive(width, nameof(width));
+            Argument.IsPositive(height, nameof(height));
+            Argument.IsPositive(fps, nameof(fps));
+            Argument.IsNotNegative(frameCount, nameof(frameCount));
+            Argument.IsInRange(quality, 1, 100, nameof(quality));
+
+            CheckSupportedPlatform();
 
             this.width = width;
             this.height = height;
             sourceBuffer = new byte[width * height * 4];
 
-            inBitmapInfo = CreateBitmapInfo(width, height, 32, KnownFourCCs.Codecs.Uncompressed);
+            inBitmapInfo = CreateBitmapInfo(width, height, 32, CodecIds.Uncompressed);
             inBitmapInfo.ImageSize = (uint)sourceBuffer.Length;
 
             if (codecPreference == null || codecPreference.Length == 0)
@@ -221,7 +242,7 @@ namespace SharpAvi.Codecs
         /// <summary>
         /// Performs any necessary cleanup before this instance is garbage-collected.
         /// </summary>
-        ~Mpeg4VideoEncoderVcm()
+        ~Mpeg4VcmVideoEncoder()
         {
             Dispose();
         }
@@ -269,24 +290,15 @@ namespace SharpAvi.Codecs
         #region IVideoEncoder Members
 
         /// <summary>Video codec.</summary>
-        public FourCC Codec
-        {
-            get { return outBitmapInfo.Compression; }
-        }
+        public FourCC Codec => outBitmapInfo.Compression;
 
         /// <summary>Number of bits per pixel in the encoded image.</summary>
-        public BitsPerPixel BitsPerPixel
-        {
-            get { return BitsPerPixel.Bpp24; }
-        }
+        public BitsPerPixel BitsPerPixel => BitsPerPixel.Bpp24;
 
         /// <summary>
         /// Maximum size of the encoded frame.
         /// </summary>
-        public int MaxEncodedSize
-        {
-            get { return maxEncodedSize; }
-        }
+        public int MaxEncodedSize => maxEncodedSize;
 
         /// <summary>
         /// Whether to vertically flip the frame before writing
@@ -298,12 +310,15 @@ namespace SharpAvi.Codecs
         }
 
         /// <summary>Encodes a frame.</summary>
-        /// <seealso cref="IVideoEncoder.EncodeFrame"/>
         public int EncodeFrame(byte[] source, int srcOffset, byte[] destination, int destOffset, out bool isKeyFrame)
         {
-            // TODO: Introduce Width and Height in IVideoRecorder and add Requires to EncodeFrame contract
-            Contract.Assert(srcOffset + 4 * width * height <= source.Length);
-
+            Argument.IsNotNull(source, nameof(source));
+            Argument.IsNotNegative(srcOffset, nameof(srcOffset));
+            Argument.ConditionIsMet(srcOffset + 4 * width * height <= source.Length,
+                "Source end offset exceeds the source length.");
+            Argument.IsNotNull(destination, nameof(destination));
+            Argument.IsNotNegative(destOffset, nameof(destOffset));
+            
             if (flipVertical)
             {
                 if (sourceBuffer == null)
@@ -315,43 +330,72 @@ namespace SharpAvi.Codecs
             {
                 sourceBuffer = source;
             }
+            
+#if NET5_0_OR_GREATER
+            return EncodeFrame(source.AsSpan(srcOffset), destination.AsSpan(destOffset), out isKeyFrame);
+#else
+            BitmapUtils.FlipVertical(source, srcOffset, sourceBuffer, 0, height, width * 4);
 
             var sourceHandle = GCHandle.Alloc(sourceBuffer, GCHandleType.Pinned);
             var encodedHandle = GCHandle.Alloc(destination, GCHandleType.Pinned);
             try
             {
-                var outInfo = outBitmapInfo;
-                outInfo.ImageSize = (uint)destination.Length;
-                var inInfo = inBitmapInfo;
-                int outFlags;
-                int chunkID;
-                var flags = framesFromLastKey >= keyFrameRate ? VfwApi.ICCOMPRESS_KEYFRAME : 0;
+                var sourcePtr = sourceHandle.AddrOfPinnedObject();
+                var encodedPtr = encodedHandle.AddrOfPinnedObject();
 
-                var result = VfwApi.ICCompress(compressorHandle, flags,
-                    ref outInfo, encodedHandle.AddrOfPinnedObject(), ref inInfo, sourceHandle.AddrOfPinnedObject(),
-                    out chunkID, out outFlags, frameIndex,
-                    0, quality, IntPtr.Zero, IntPtr.Zero);
-                CheckICResult(result);
-                frameIndex++;
-
-
-                isKeyFrame = (outFlags & VfwApi.AVIIF_KEYFRAME) == VfwApi.AVIIF_KEYFRAME;
-                if (isKeyFrame)
-                {
-                    framesFromLastKey = 1;
-                }
-                else
-                {
-                    framesFromLastKey++;
-                }
-
-                return (int)outInfo.ImageSize;
+                return EncodeFrame(sourcePtr, encodedPtr, (uint)(destination.Length - destOffset), out isKeyFrame);
             }
             finally
             {
                 sourceHandle.Free();
                 encodedHandle.Free();
             }
+#endif
+        }
+
+#if NET5_0_OR_GREATER
+        /// <summary>Encodes a frame.</summary>
+        public unsafe int EncodeFrame(ReadOnlySpan<byte> source, Span<byte> destination, out bool isKeyFrame)
+        {
+            Argument.ConditionIsMet(4 * width * height <= source.Length,
+                "Source end offset exceeds the source length.");
+
+            BitmapUtils.FlipVertical(source, sourceBuffer, height, width * 4);
+            fixed (void* srcPtr = sourceBuffer, destPtr = destination)
+            {
+                var srcIntPtr = new IntPtr(srcPtr);
+                var destIntPtr = new IntPtr(destPtr);
+                return EncodeFrame(srcIntPtr, destIntPtr, (uint)destination.Length, out isKeyFrame);
+            }
+        }
+#endif
+
+        private int EncodeFrame(IntPtr sourcePtr, IntPtr destinationPtr, uint destinationSize, out bool isKeyFrame)
+        {
+            var outInfo = outBitmapInfo;
+            outInfo.ImageSize = destinationSize;
+            var inInfo = inBitmapInfo;
+            var flags = framesFromLastKey >= keyFrameRate ? VfwApi.ICCOMPRESS_KEYFRAME : 0;
+
+            var result = VfwApi.ICCompress(compressorHandle, flags,
+                ref outInfo, destinationPtr, ref inInfo, sourcePtr,
+                out _, out var outFlags, frameIndex,
+                0, quality, IntPtr.Zero, IntPtr.Zero);
+            CheckICResult(result);
+            frameIndex++;
+
+
+            isKeyFrame = (outFlags & VfwApi.AVIIF_KEYFRAME) == VfwApi.AVIIF_KEYFRAME;
+            if (isKeyFrame)
+            {
+                framesFromLastKey = 1;
+            }
+            else
+            {
+                framesFromLastKey++;
+            }
+
+            return (int)outInfo.ImageSize;
         }
 
         #endregion
@@ -383,7 +427,13 @@ namespace SharpAvi.Codecs
         private void CheckICResult(int result)
         {
             if (result != VfwApi.ICERR_OK)
-                throw new InvalidOperationException(string.Format("Encoder operation returned an error: {0}.", result));
+            {
+                var errorDesc = VfwApi.GetErrorDescription(result);
+                var resultStr = errorDesc == null
+                    ? result.ToString()
+                    : string.Format("{0} ({1})", result, errorDesc);
+                throw new InvalidOperationException(string.Format("Encoder operation returned an error: {0}.", resultStr));
+            }
         }
     }
 }

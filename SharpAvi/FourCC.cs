@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.Contracts;
+﻿using SharpAvi.Utilities;
+using System;
 using System.Linq;
 
 namespace SharpAvi
@@ -9,7 +10,7 @@ namespace SharpAvi
     /// <remarks>
     /// FOURCCs are used widely across AVI format.
     /// </remarks>
-    public struct FourCC
+    public struct FourCC : IEquatable<FourCC>
     {
         private readonly uint valueDWord;
         private readonly string valueString;
@@ -45,13 +46,12 @@ namespace SharpAvi
         /// </remarks>
         public FourCC(string value)
         {
-            Contract.Requires(value != null);
-            Contract.Requires(value.Length <= 4);
-            // Allow only printable ASCII characters
-            Contract.Requires(Contract.ForAll(value, c => ' ' <= c && c <= '~'));
+            Argument.IsNotNull(value, nameof(value));
+            Argument.Meets(value.Length <= 4, nameof(value), "Value cannot be longer than 4 characters.");
+            Argument.Meets(value.All(c => ' ' <= c && c <= '~'), nameof(value), "Value can only contain printable ASCII characters.");
 
             valueString = value.PadRight(4);
-            valueDWord = (uint)valueString[0] + ((uint)valueString[1] << 8) + ((uint)valueString[2] << 16) + ((uint)valueString[3] << 24);
+            valueDWord = valueString[0] + ((uint)valueString[1] << 8) + ((uint)valueString[2] << 16) + ((uint)valueString[3] << 24);
         }
 
         /// <summary>
@@ -69,73 +69,50 @@ namespace SharpAvi
         /// <summary>
         /// Gets hash code of this instance.
         /// </summary>
-        public override int GetHashCode()
-        {
-            return valueDWord.GetHashCode();
-        }
+        public override int GetHashCode() => valueDWord.GetHashCode();
 
         /// <summary>
         /// Determines whether this instance is equal to other object.
         /// </summary>
-        public override bool Equals(object obj)
-        {
-            if (obj is FourCC)
-            {
-                return (FourCC)obj == this;
-            }
-            else
-            {
-                return base.Equals(obj);
-            }
-        }
+        public override bool Equals(object obj) 
+            => obj is FourCC other ? Equals(other) : base.Equals(obj);
+
+        /// <summary>
+        /// Determines whether this instance is equal to another <see cref="FourCC"/> value.
+        /// </summary>
+        /// <param name="other"></param>
+        /// <returns></returns>
+        public bool Equals(FourCC other) => this.valueDWord == other.valueDWord;
 
 
         /// <summary>
         /// Converts an integer value to <see cref="FourCC"/>.
         /// </summary>
-        public static implicit operator FourCC(uint value)
-        {
-            return new FourCC(value);
-        }
+        public static implicit operator FourCC(uint value) => new FourCC(value);
 
         /// <summary>
         /// Converts a string value to <see cref="FourCC"/>.
         /// </summary>
-        public static implicit operator FourCC(string value)
-        {
-            return new FourCC(value);
-        }
+        public static implicit operator FourCC(string value) => new FourCC(value);
 
         /// <summary>
         /// Gets the integer value of <see cref="FourCC"/> instance.
         /// </summary>
-        public static explicit operator uint(FourCC value)
-        {
-            return value.valueDWord;
-        }
+        public static explicit operator uint(FourCC value) => value.valueDWord;
 
         /// <summary>
         /// Gets the string value of <see cref="FourCC"/> instance.
         /// </summary>
-        public static explicit operator string(FourCC value)
-        {
-            return value.valueString;
-        }
+        public static explicit operator string(FourCC value) => value.valueString;
 
         /// <summary>
         /// Determines whether two instances of <see cref="FourCC"/> are equal.
         /// </summary>
-        public static bool operator ==(FourCC value1, FourCC value2)
-        {
-            return value1.valueDWord == value2.valueDWord;
-        }
+        public static bool operator ==(FourCC value1, FourCC value2) => value1.Equals(value2);
 
         /// <summary>
         /// Determines whether two instances of <see cref="FourCC"/> are not equal.
         /// </summary>
-        public static bool operator !=(FourCC value1, FourCC value2)
-        {
-            return !(value1 == value2);
-        }
+        public static bool operator !=(FourCC value1, FourCC value2) => !value1.Equals(value2);
     }
 }

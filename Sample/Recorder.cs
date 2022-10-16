@@ -1,23 +1,22 @@
-﻿using System;
-using System.Diagnostics.Contracts;
+﻿using NAudio.Wave;
+using SharpAvi.Codecs;
+using SharpAvi.Output;
+using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Threading;
-#if FX45
 using System.Threading.Tasks;
-#endif
 using System.Windows;
-using NAudio.Wave;
-using SharpAvi.Codecs;
-using SharpAvi.Output;
 using System.Windows.Interop;
-using System.Diagnostics;
 
 namespace SharpAvi.Sample
 {
     internal class Recorder : IDisposable
     {
+        public static readonly FourCC MJPEG_IMAGE_SHARP = "IMG#";
+
         private readonly int screenWidth;
         private readonly int screenHeight;
         private readonly AviWriter writer;
@@ -93,22 +92,24 @@ namespace SharpAvi.Sample
         private IAviVideoStream CreateVideoStream(FourCC codec, int quality)
         {
             // Select encoder type based on FOURCC of codec
-            if (codec == KnownFourCCs.Codecs.Uncompressed)
+            if (codec == CodecIds.Uncompressed)
             {
                 return writer.AddUncompressedVideoStream(screenWidth, screenHeight);
             }
-            else if (codec == KnownFourCCs.Codecs.MotionJpeg)
+            else if (codec == CodecIds.MotionJpeg)
             {
-                return writer.AddMotionJpegVideoStream(screenWidth, screenHeight, quality
-#if !FX45
-                    // Implementation of this encoder for .NET 3.5 requires single-threaded access
-                    , forceSingleThreadedAccess: true
-#endif
-                    );
+                // Use M-JPEG based on WPF (Windows only)
+                return writer.AddMJpegWpfVideoStream(screenWidth, screenHeight, quality);
+            }
+            else if (codec == MJPEG_IMAGE_SHARP)
+            {
+                // Use M-JPEG based on the SixLabors.ImageSharp package (cross-platform)
+                // Included in the SharpAvi.ImageSharp package
+                return writer.AddMJpegImageSharpVideoStream(screenWidth, screenHeight, quality);
             }
             else
             {
-                return writer.AddMpeg4VideoStream(screenWidth, screenHeight, (double)writer.FramesPerSecond,
+                return writer.AddMpeg4VcmVideoStream(screenWidth, screenHeight, (double)writer.FramesPerSecond,
                     // It seems that all tested MPEG-4 VfW codecs ignore the quality affecting parameters passed through VfW API
                     // They only respect the settings from their own configuration dialogs, and Mpeg4VideoEncoder currently has no support for this
                     quality: quality,
@@ -125,7 +126,7 @@ namespace SharpAvi.Sample
             if (encode)
             {
                 // LAME DLL path is set in App.OnStartup()
-                return writer.AddMp3AudioStream(waveFormat.Channels, waveFormat.SampleRate, bitRate);
+                return writer.AddMp3LameAudioStream(waveFormat.Channels, waveFormat.SampleRate, bitRate);
             }
             else
             {
@@ -169,11 +170,7 @@ namespace SharpAvi.Sample
         {
             var stopwatch = new Stopwatch();
             var buffer = new byte[screenWidth * screenHeight * 4];
-#if FX45
             Task videoWriteTask = null;
-#else
-            IAsyncResult videoWriteResult = null;
-#endif
             var isFirstFrame = true;
             var shotsTaken = 0;
             var timeTillNextFrame = TimeSpan.Zero;
@@ -187,11 +184,7 @@ namespace SharpAvi.Sample
                 // Wait for the previous frame is written
                 if (!isFirstFrame)
                 {
-#if FX45
                     videoWriteTask.Wait();
-#else
-                    videoStream.EndWriteFrame(videoWriteResult);
-#endif
                     videoFrameWritten.Set();
                 }
 
@@ -203,10 +196,11 @@ namespace SharpAvi.Sample
                 }
 
                 // Start asynchronous (encoding and) writing of the new frame
-#if FX45
-                videoWriteTask = videoStream.WriteFrameAsync(true, buffer, 0, buffer.Length);
+                // Overloads with Memory parameters are available on .NET 5+
+#if NET5_0_OR_GREATER
+                videoWriteTask = videoStream.WriteFrameAsync(true, buffer.AsMemory(0, buffer.Length));
 #else
-                videoWriteResult = videoStream.BeginWriteFrame(true, buffer, 0, buffer.Length, null, null);
+                videoWriteTask = videoStream.WriteFrameAsync(true, buffer, 0, buffer.Length);
 #endif
 
                 timeTillNextFrame = TimeSpan.FromSeconds(shotsTaken / (double)writer.FramesPerSecond - stopwatch.Elapsed.TotalSeconds);
@@ -221,11 +215,7 @@ namespace SharpAvi.Sample
             // Wait for the last frame is written
             if (!isFirstFrame)
             {
-#if FX45
                 videoWriteTask.Wait();
-#else
-                videoStream.EndWriteFrame(videoWriteResult);
-#endif
             }
         }
 
@@ -247,9 +237,14 @@ namespace SharpAvi.Sample
         private void audioSource_DataAvailable(object sender, WaveInEventArgs e)
         {
             var signalled = WaitHandle.WaitAny(new WaitHandle[] { videoFrameWritten, stopThread });
-            if (signalled == 0)
+            if (signalled == 0 && e.BytesRecorded > 0)
             {
+                // Overloads with Span parameters are available on .NET 5+
+#if NET5_0_OR_GREATER
+                audioStream.WriteBlock(e.Buffer.AsSpan(0, e.BytesRecorded));
+#else
                 audioStream.WriteBlock(e.Buffer, 0, e.BytesRecorded);
+#endif
                 audioBlockWritten.Set();
             }
         }

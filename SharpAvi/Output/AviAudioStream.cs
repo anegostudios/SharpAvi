@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.IO;
-using System.Linq;
-using System.Text;
+﻿using SharpAvi.Format;
+using SharpAvi.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace SharpAvi.Output
 {
@@ -24,8 +22,7 @@ namespace SharpAvi.Output
             int channelCount, int samplesPerSecond, int bitsPerSample)
             : base(index)
         {
-            Contract.Requires(index >= 0);
-            Contract.Requires(writeHandler != null);
+            Argument.IsNotNull(writeHandler, nameof(writeHandler));
 
             this.writeHandler = writeHandler;
 
@@ -110,53 +107,46 @@ namespace SharpAvi.Output
             }
         }
 
-        public void WriteBlock(byte[] buffer, int startIndex, int count)
+        public void WriteBlock(byte[] data, int startIndex, int length)
         {
-            writeHandler.WriteAudioBlock(this, buffer, startIndex, count);
+            Argument.IsNotNull(data, nameof(data));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= data.Length, "End offset exceeds the length of data.");
+
+#if NET5_0_OR_GREATER
+            WriteBlock(data.AsSpan(startIndex, length));
+#else
+            writeHandler.WriteAudioBlock(this, data, startIndex, length);
+            System.Threading.Interlocked.Increment(ref blocksWritten);
+#endif
+        }
+
+        public Task WriteBlockAsync(byte[] data, int startIndex, int length)
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
+
+#if NET5_0_OR_GREATER
+        public void WriteBlock(ReadOnlySpan<byte> data)
+        {
+            Argument.Meets(data.Length > 0, nameof(data), "Cannot write an empty block.");
+
+            writeHandler.WriteAudioBlock(this, data);
             System.Threading.Interlocked.Increment(ref blocksWritten);
         }
 
-#if FX45
-        public System.Threading.Tasks.Task WriteBlockAsync(byte[] data, int startIndex, int length)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-#else
-        public IAsyncResult BeginWriteBlock(byte[] data, int startIndex, int length, AsyncCallback userCallback, object stateObject)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-
-        public void EndWriteBlock(IAsyncResult asyncResult)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
+        public Task WriteBlockAsync(ReadOnlyMemory<byte> data)
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
 #endif
 
-        public int BlocksWritten
-        {
-            get { return blocksWritten; }
-        }
+        public int BlocksWritten => blocksWritten;
 
 
-        public override FourCC StreamType
-        {
-            get { return KnownFourCCs.StreamTypes.Audio; }
-        }
+        public override FourCC StreamType => KnownFourCCs.StreamTypes.Audio;
 
-        protected override FourCC GenerateChunkId()
-        {
- 	        return KnownFourCCs.Chunks.AudioData(Index);
-        }
+        protected override FourCC GenerateChunkId() => KnownFourCCs.Chunks.AudioData(Index);
 
-        public override void WriteHeader()
-        {
-            writeHandler.WriteStreamHeader(this);
-        }
+        public override void WriteHeader() => writeHandler.WriteStreamHeader(this);
 
-        public override void WriteFormat()
-        {
-            writeHandler.WriteStreamFormat(this);
-        }
+        public override void WriteFormat() => writeHandler.WriteStreamFormat(this);
     }
 }

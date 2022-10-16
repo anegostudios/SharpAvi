@@ -1,17 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿// Mp3LameAudioEncoder is not supported on .NET Standard yet
+#if !NETSTANDARD
+using System;
 
 namespace SharpAvi.Codecs
 {
-    partial class Mp3AudioEncoderLame
+    partial class Mp3LameAudioEncoder
     {
         /// <summary>
         /// Interface is used to access the API of the LAME DLL.
         /// </summary>
         /// <remarks>
-        /// Clients of <see cref="Mp3AudioEncoderLame"/> class need not to work with
+        /// Clients of <see cref="Mp3LameAudioEncoder"/> class need not to work with
         /// this interface directly.
         /// </remarks>
         public interface ILameFacade
@@ -51,6 +50,17 @@ namespace SharpAvi.Codecs
             /// </summary>
             void PrepareEncoding();
 
+#if NET5_0_OR_GREATER
+            /// <summary>
+            /// Encodes a chunk of audio data.
+            /// </summary>
+            int Encode(ReadOnlySpan<byte> source, int sampleCount, Span<byte> dest);
+
+            /// <summary>
+            /// Finalizes the encoding process.
+            /// </summary>
+            int FinishEncoding(Span<byte> dest);
+#else
             /// <summary>
             /// Encodes a chunk of audio data.
             /// </summary>
@@ -60,6 +70,8 @@ namespace SharpAvi.Codecs
             /// Finalizes the encoding process.
             /// </summary>
             int FinishEncoding(byte[] dest, int destIndex);
+#endif
         }
     }
 }
+#endif

@@ -1,6 +1,7 @@
 ﻿using System;
-using System.Diagnostics.Contracts;
+using System.Threading.Tasks;
 using SharpAvi.Codecs;
+using SharpAvi.Utilities;
 
 namespace SharpAvi.Output
 {
@@ -23,8 +24,7 @@ namespace SharpAvi.Output
         public EncodingVideoStreamWrapper(IAviVideoStreamInternal baseStream, IVideoEncoder encoder, bool ownsEncoder)
             : base(baseStream)
         {
-            Contract.Requires(baseStream != null);
-            Contract.Requires(encoder != null);
+            Argument.IsNotNull(encoder, nameof(encoder));
 
             this.encoder = encoder;
             this.ownsEncoder = ownsEncoder;
@@ -35,11 +35,7 @@ namespace SharpAvi.Output
         {
             if (ownsEncoder)
             {
-                var encoderDisposable = encoder as IDisposable;
-                if (encoderDisposable != null)
-                {
-                    encoderDisposable.Dispose();
-                }
+                (encoder as IDisposable)?.Dispose();
             }
 
             base.Dispose();
@@ -49,48 +45,47 @@ namespace SharpAvi.Output
         /// <summary> Video codec. </summary>
         public override FourCC Codec
         {
-            get { return encoder.Codec; }
-            set
-            {
-                ThrowPropertyDefinedByEncoder();
-            }
+            get => encoder.Codec;
+            set => ThrowPropertyDefinedByEncoder();
         }
 
         /// <summary> Bits per pixel. </summary>
         public override BitsPerPixel BitsPerPixel
         {
-            get { return encoder.BitsPerPixel; }
-            set
-            {
-                ThrowPropertyDefinedByEncoder();
-            }
+            get => encoder.BitsPerPixel;
+            set => ThrowPropertyDefinedByEncoder();
         }
 
         /// <summary>Encodes and writes a frame.</summary>
-        public override void WriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int count)
+        public override void WriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length)
         {
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= frameData.Length, "End offset exceeds the length of frame data.");
+
             // Prevent accessing encoded buffer by multiple threads simultaneously
             lock (syncBuffer)
             {
-                count = encoder.EncodeFrame(frameData, startIndex, encodedBuffer, 0, out isKeyFrame);
-                base.WriteFrame(isKeyFrame, encodedBuffer, 0, count);
+                length = encoder.EncodeFrame(frameData, startIndex, encodedBuffer, 0, out isKeyFrame);
+                base.WriteFrame(isKeyFrame, encodedBuffer, 0, length);
             }
         }
 
-#if FX45
-        public override System.Threading.Tasks.Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int length)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-#else
-        public override IAsyncResult BeginWriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length, AsyncCallback userCallback, object stateObject)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
+        public override Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int length) 
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
 
-        public override void EndWriteFrame(IAsyncResult asyncResult)
+#if NET5_0_OR_GREATER
+        public override void WriteFrame(bool isKeyFrame, ReadOnlySpan<byte> frameData)
         {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            // Prevent accessing encoded buffer by multiple threads simultaneously
+            lock (syncBuffer)
+            {
+                var encodedLength = encoder.EncodeFrame(frameData, encodedBuffer.AsSpan(), out isKeyFrame);
+                base.WriteFrame(isKeyFrame, encodedBuffer.AsSpan(0, encodedLength));
+            }
         }
 #endif
 
@@ -104,9 +99,7 @@ namespace SharpAvi.Output
         }
 
 
-        private void ThrowPropertyDefinedByEncoder()
-        {
-            throw new NotSupportedException("The value of the property is defined by the encoder.");
-        }
+        private void ThrowPropertyDefinedByEncoder() 
+            => throw new NotSupportedException("The value of the property is defined by the encoder.");
     }
 }

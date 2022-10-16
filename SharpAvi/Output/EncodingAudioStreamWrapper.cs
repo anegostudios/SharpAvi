@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Linq;
-using System.Text;
-using SharpAvi.Codecs;
+﻿using SharpAvi.Codecs;
+using SharpAvi.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace SharpAvi.Output
 {
@@ -20,8 +18,7 @@ namespace SharpAvi.Output
         public EncodingAudioStreamWrapper(IAviAudioStreamInternal baseStream, IAudioEncoder encoder, bool ownsEncoder)
             : base(baseStream)
         {
-            Contract.Requires(baseStream != null);
-            Contract.Requires(encoder != null);
+            Argument.IsNotNull(encoder, nameof(encoder));
 
             this.encoder = encoder;
             this.ownsEncoder = ownsEncoder;
@@ -31,11 +28,7 @@ namespace SharpAvi.Output
         {
             if (ownsEncoder)
             {
-                var encoderDisposable = encoder as IDisposable;
-                if (encoderDisposable != null)
-                {
-                    encoderDisposable.Dispose();
-                }
+                (encoder as IDisposable)?.Dispose();
             }
 
             base.Dispose();
@@ -109,6 +102,11 @@ namespace SharpAvi.Output
         /// </summary>
         public override void WriteBlock(byte[] data, int startIndex, int length)
         {
+            Argument.IsNotNull(data, nameof(data));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= data.Length, "End offset exceeds the length of data.");
+
             // Prevent accessing encoded buffer by multiple threads simultaneously
             lock (syncBuffer)
             {
@@ -121,21 +119,28 @@ namespace SharpAvi.Output
             }
         }
 
-#if FX45
-        public override System.Threading.Tasks.Task WriteBlockAsync(byte[] data, int startIndex, int length)
+        public override Task WriteBlockAsync(byte[] data, int startIndex, int length) 
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
+
+#if NET5_0_OR_GREATER
+        public override void WriteBlock(ReadOnlySpan<byte> data)
         {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-#else
-        public override IAsyncResult BeginWriteBlock(byte[] data, int startIndex, int length, AsyncCallback userCallback, object stateObject)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
+            Argument.Meets(data.Length > 0, nameof(data), "Cannot write an empty block.");
+
+            // Prevent accessing encoded buffer by multiple threads simultaneously
+            lock (syncBuffer)
+            {
+                EnsureBufferIsSufficient(data.Length);
+                var encodedLength = encoder.EncodeBlock(data, encodedBuffer.AsSpan());
+                if (encodedLength > 0)
+                {
+                    base.WriteBlock(encodedBuffer.AsSpan(0, encodedLength));
+                }
+            }
         }
 
-        public override void EndWriteBlock(IAsyncResult asyncResult)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
+        public override Task WriteBlockAsync(ReadOnlyMemory<byte> data)
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
 #endif
 
         public override void PrepareForWriting()
@@ -187,9 +192,7 @@ namespace SharpAvi.Output
             encodedBuffer = new byte[newLength];
         }
 
-        private void ThrowPropertyDefinedByEncoder()
-        {
-            throw new NotSupportedException("The value of the property is defined by the encoder.");
-        }
+        private void ThrowPropertyDefinedByEncoder() 
+            => throw new NotSupportedException("The value of the property is defined by the encoder.");
     }
 }

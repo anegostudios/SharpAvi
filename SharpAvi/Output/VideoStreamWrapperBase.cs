@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Linq;
-using System.Text;
+﻿using SharpAvi.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace SharpAvi.Output
 {
@@ -16,117 +14,95 @@ namespace SharpAvi.Output
     {
         protected VideoStreamWrapperBase(IAviVideoStreamInternal baseStream)
         {
-            Contract.Requires(baseStream != null);
+            Argument.IsNotNull(baseStream, nameof(baseStream));
 
-            this.baseStream = baseStream;
+            this.BaseStream = baseStream;
         }
 
-        protected IAviVideoStreamInternal BaseStream
-        {
-            get { return baseStream; }
-        }
-        private readonly IAviVideoStreamInternal baseStream;
+        protected IAviVideoStreamInternal BaseStream { get; }
 
-        public virtual void Dispose()
-        {
-            var baseStreamDisposable = baseStream as IDisposable;
-            if (baseStreamDisposable != null)
-            {
-                baseStreamDisposable.Dispose();
-            }
-        }
+        public virtual void Dispose() => (BaseStream as IDisposable)?.Dispose();
 
         public virtual int Width
         {
-            get { return baseStream.Width; }
-            set { baseStream.Width = value; }
+            get { return BaseStream.Width; }
+            set { BaseStream.Width = value; }
         }
 
         public virtual int Height
         {
-            get { return baseStream.Height; }
-            set { baseStream.Height = value; }
+            get { return BaseStream.Height; }
+            set { BaseStream.Height = value; }
         }
 
         public virtual BitsPerPixel BitsPerPixel
         {
-            get { return baseStream.BitsPerPixel; }
-            set { baseStream.BitsPerPixel = value; }
+            get { return BaseStream.BitsPerPixel; }
+            set { BaseStream.BitsPerPixel = value; }
         }
 
         public virtual FourCC Codec
         {
-            get { return baseStream.Codec; }
-            set { baseStream.Codec = value; }
+            get { return BaseStream.Codec; }
+            set { BaseStream.Codec = value; }
         }
 
         public virtual void WriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length)
         {
-            baseStream.WriteFrame(isKeyFrame, frameData, startIndex, length);
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= frameData.Length, "End offset exceeds the length of frame data.");
+
+            BaseStream.WriteFrame(isKeyFrame, frameData, startIndex, length);
         }
 
-#if FX45
-        public virtual System.Threading.Tasks.Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int length)
+        public virtual Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int length)
         {
-            return baseStream.WriteFrameAsync(isKeyFrame, frameData, startIndex, length);
-        }
-#else
-        public virtual IAsyncResult BeginWriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length, 
-            AsyncCallback userCallback, object stateObject)
-        {
-            return baseStream.BeginWriteFrame(isKeyFrame, frameData, startIndex, length, userCallback, stateObject);
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= frameData.Length, "End offset exceeds the length of frame data.");
+
+            return BaseStream.WriteFrameAsync(isKeyFrame, frameData, startIndex, length);
         }
 
-        public virtual void EndWriteFrame(IAsyncResult asyncResult)
+#if NET5_0_OR_GREATER
+        public virtual void WriteFrame(bool isKeyFrame, ReadOnlySpan<byte> frameData)
         {
-            baseStream.EndWriteFrame(asyncResult);
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            BaseStream.WriteFrame(isKeyFrame, frameData);
+        }
+
+        public virtual Task WriteFrameAsync(bool isKeyFrame, ReadOnlyMemory<byte> frameData)
+        {
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            return BaseStream.WriteFrameAsync(isKeyFrame, frameData);
         }
 #endif
 
-        public int FramesWritten
-        {
-            get { return baseStream.FramesWritten; }
-        }
+        public int FramesWritten => BaseStream.FramesWritten;
 
-        public int Index
-        {
-            get { return baseStream.Index; }
-        }
+        public int Index => BaseStream.Index;
 
         public virtual string Name
         {
-            get { return baseStream.Name; }
-            set { baseStream.Name = value; }
+            get { return BaseStream.Name; }
+            set { BaseStream.Name = value; }
         }
 
-        public FourCC StreamType
-        {
-            get { return baseStream.StreamType; }
-        }
+        public FourCC StreamType => BaseStream.StreamType;
 
-        public FourCC ChunkId
-        {
-            get { return baseStream.ChunkId; }
-        }
+        public FourCC ChunkId => BaseStream.ChunkId;
 
-        public virtual void PrepareForWriting()
-        {
-            baseStream.PrepareForWriting();
-        }
+        public virtual void PrepareForWriting() => BaseStream.PrepareForWriting();
 
-        public virtual void FinishWriting()
-        {
-            baseStream.FinishWriting();
-        }
+        public virtual void FinishWriting() => BaseStream.FinishWriting();
 
-        public void WriteHeader()
-        {
-            baseStream.WriteHeader();
-        }
+        public void WriteHeader() => BaseStream.WriteHeader();
 
-        public void WriteFormat()
-        {
-            baseStream.WriteFormat();
-        }
+        public void WriteFormat() => BaseStream.WriteFormat();
     }
 }

@@ -1,8 +1,7 @@
 ﻿using System;
-using System.Diagnostics.Contracts;
 using System.Threading.Tasks;
 
-namespace SharpAvi.Output
+namespace SharpAvi.Utilities
 {
     /// <summary>
     /// Serializes synchronous and asynchronous invocations in one queue.
@@ -17,11 +16,8 @@ namespace SharpAvi.Output
         /// </summary>
         public SequentialInvoker()
         {
-            var tcs = new TaskCompletionSource<bool>();
-            tcs.SetResult(true);
-
             // Initialize lastTask to already completed task
-            lastTask = tcs.Task;
+            lastTask = Task.FromResult(true);
         }
 
         /// <summary>
@@ -33,7 +29,7 @@ namespace SharpAvi.Output
         /// </remarks>
         public void Invoke(Action action)
         {
-            Contract.Requires(action != null);
+            Argument.IsNotNull(action, nameof(action));
 
             Task prevTask;
             var tcs = new TaskCompletionSource<bool>();
@@ -74,7 +70,7 @@ namespace SharpAvi.Output
         /// </remarks>
         public Task InvokeAsync(Action action)
         {
-            Contract.Requires(action != null);
+            Argument.IsNotNull(action, nameof(action));
 
             Task result;
             lock (sync)

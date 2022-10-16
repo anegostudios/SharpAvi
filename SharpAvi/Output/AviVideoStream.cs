@@ -1,5 +1,7 @@
-﻿using System;
-using System.Diagnostics.Contracts;
+﻿using SharpAvi.Format;
+using SharpAvi.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace SharpAvi.Output
 {
@@ -16,17 +18,16 @@ namespace SharpAvi.Output
             int width, int height, BitsPerPixel bitsPerPixel)
             : base(index)
         {
-            Contract.Requires(index >= 0);
-            Contract.Requires(writeHandler != null);
-            Contract.Requires(width > 0);
-            Contract.Requires(height > 0);
-            Contract.Requires(Enum.IsDefined(typeof(BitsPerPixel), bitsPerPixel));
+            Argument.IsNotNull(writeHandler, nameof(writeHandler));
+            Argument.IsPositive(width, nameof(width));
+            Argument.IsPositive(height, nameof(height));
+            Argument.IsEnumMember(bitsPerPixel, nameof(bitsPerPixel));
 
             this.writeHandler = writeHandler;
             this.width = width;
             this.height = height;
             this.bitsPerPixel = bitsPerPixel;
-            this.streamCodec = KnownFourCCs.Codecs.Uncompressed;
+            this.streamCodec = CodecIds.Uncompressed;
         }
 
 
@@ -72,52 +73,45 @@ namespace SharpAvi.Output
 
         public void WriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int count)
         {
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(count, nameof(count));
+            Argument.ConditionIsMet(startIndex + count <= frameData.Length, "End offset exceeds the length of frame data.");
+
+#if NET5_0_OR_GREATER
+            WriteFrame(isKeyFrame, frameData.AsSpan(startIndex, count));
+#else
             writeHandler.WriteVideoFrame(this, isKeyFrame, frameData, startIndex, count);
+            System.Threading.Interlocked.Increment(ref framesWritten);
+#endif
+        }
+
+        public Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int count) 
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
+
+#if NET5_0_OR_GREATER
+        public void WriteFrame(bool isKeyFrame, ReadOnlySpan<byte> frameData)
+        {
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            writeHandler.WriteVideoFrame(this, isKeyFrame, frameData);
             System.Threading.Interlocked.Increment(ref framesWritten);
         }
 
-#if FX45
-        public System.Threading.Tasks.Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int count)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-#else
-        public IAsyncResult BeginWriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int count, 
-            AsyncCallback userCallback, object stateObject)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
-
-        public void EndWriteFrame(IAsyncResult asyncResult)
-        {
-            throw new NotSupportedException("Asynchronous writes are not supported.");
-        }
+        public Task WriteFrameAsync(bool isKeyFrame, ReadOnlyMemory<byte> frameData)
+            => throw new NotSupportedException("Asynchronous writes are not supported.");
 #endif
 
-        public int FramesWritten
-        {
-            get { return framesWritten; }
-        }
+        public int FramesWritten => framesWritten;
 
 
-        public override FourCC StreamType
-        {
-            get { return KnownFourCCs.StreamTypes.Video; }
-        }
+        public override FourCC StreamType => KnownFourCCs.StreamTypes.Video;
 
-        protected override FourCC GenerateChunkId()
-        {
-            return KnownFourCCs.Chunks.VideoFrame(Index, Codec != KnownFourCCs.Codecs.Uncompressed);
-        }
+        protected override FourCC GenerateChunkId() 
+            => KnownFourCCs.Chunks.VideoFrame(Index, Codec != CodecIds.Uncompressed);
 
-        public override void WriteHeader()
-        {
-            writeHandler.WriteStreamHeader(this);
-        }
+        public override void WriteHeader() => writeHandler.WriteStreamHeader(this);
 
-        public override void WriteFormat()
-        {
-            writeHandler.WriteStreamFormat(this);
-        }
+        public override void WriteFormat() => writeHandler.WriteStreamFormat(this);
     }
 }

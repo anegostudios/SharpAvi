@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Linq;
-using System.Text;
-#if FX45
+﻿using SharpAvi.Utilities;
+using System;
 using System.Threading.Tasks;
-#endif
 
 namespace SharpAvi.Output
 {
@@ -19,30 +14,50 @@ namespace SharpAvi.Output
         public AsyncVideoStreamWrapper(IAviVideoStreamInternal baseStream)
             : base(baseStream)
         {
-            Contract.Requires(baseStream != null);
         }
 
         public override void WriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length)
         {
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= frameData.Length, "End offset exceeds the length of frame data.");
+
             writeInvoker.Invoke(() => base.WriteFrame(isKeyFrame, frameData, startIndex, length));
         }
 
-#if FX45
         public override Task WriteFrameAsync(bool isKeyFrame, byte[] frameData, int startIndex, int length)
         {
+            Argument.IsNotNull(frameData, nameof(frameData));
+            Argument.IsNotNegative(startIndex, nameof(startIndex));
+            Argument.IsPositive(length, nameof(length));
+            Argument.ConditionIsMet(startIndex + length <= frameData.Length, "End offset exceeds the length of frame data.");
+
             return writeInvoker.InvokeAsync(() => base.WriteFrame(isKeyFrame, frameData, startIndex, length));
         }
-#else
-        public override IAsyncResult BeginWriteFrame(bool isKeyFrame, byte[] frameData, int startIndex, int length, AsyncCallback userCallback, object stateObject)
+
+#if NET5_0_OR_GREATER
+        public unsafe override void WriteFrame(bool isKeyFrame, ReadOnlySpan<byte> frameData)
         {
-            return writeInvoker.BeginInvoke(
-                () => base.WriteFrame(isKeyFrame, frameData, startIndex, length), 
-                userCallback, stateObject);
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            fixed (void* ptr = frameData)
+            {
+                var dataPtr = new IntPtr(ptr);
+                var dataLength = frameData.Length;
+                writeInvoker.Invoke(() =>
+                {
+                    var dataSpan = new Span<byte>(dataPtr.ToPointer(), dataLength);
+                    base.WriteFrame(isKeyFrame, dataSpan);
+                });
+            }
         }
 
-        public override void EndWriteFrame(IAsyncResult asyncResult)
+        public override Task WriteFrameAsync(bool isKeyFrame, ReadOnlyMemory<byte> frameData)
         {
-            writeInvoker.EndInvoke(asyncResult);
+            Argument.Meets(frameData.Length > 0, nameof(frameData), "Cannot write an empty frame.");
+
+            return writeInvoker.InvokeAsync(() => base.WriteFrame(isKeyFrame, frameData.Span));
         }
 #endif
 

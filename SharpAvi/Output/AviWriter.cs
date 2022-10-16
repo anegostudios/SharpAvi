@@ -1,11 +1,11 @@
-﻿using System;
+﻿using SharpAvi.Codecs;
+using SharpAvi.Format;
+using SharpAvi.Utilities;
+using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Diagnostics.Contracts;
 using System.IO;
 using System.Linq;
 using System.Text;
-using SharpAvi.Codecs;
 
 namespace SharpAvi.Output
 {
@@ -17,16 +17,12 @@ namespace SharpAvi.Output
     /// </remarks>
     public class AviWriter : IDisposable, IAviStreamWriteHandler
     {
-        private const int MAX_SUPER_INDEX_ENTRIES = 256;
         private const int MAX_INDEX_ENTRIES = 15000;
         private const int INDEX1_ENTRY_SIZE = 4 * sizeof(uint);
         private const int RIFF_AVI_SIZE_TRESHOLD = 512 * 1024 * 1024;
         private const int RIFF_AVIX_SIZE_TRESHOLD = int.MaxValue - 1024 * 1024;
 
         private readonly BinaryWriter fileWriter;
-#if !FX45
-        private readonly bool closeWriter;
-#endif
         private bool isClosed = false;
         private bool startedWriting = false;
         private readonly object syncWrite = new object();
@@ -39,16 +35,7 @@ namespace SharpAvi.Output
         private int riffAviFrameCount = -1;
         private int index1Count = 0;
 
-#if FX45
         private readonly List<IAviStreamInternal> streams = new List<IAviStreamInternal>();
-#else
-        private readonly List<IAviStream> streamsList = new List<IAviStream>();
-        private IEnumerable<IAviStreamInternal> streams
-        {
-            get { return streamsList.Cast<IAviStreamInternal>(); }
-        }
-        private readonly ReadOnlyCollection<IAviStream> streamsRO;
-#endif
         private StreamInfo[] streamsInfo;
 
         /// <summary>
@@ -57,11 +44,7 @@ namespace SharpAvi.Output
         /// <param name="fileName">Path to an AVI file being written.</param>
         public AviWriter(string fileName)
         {
-            Contract.Requires(!string.IsNullOrEmpty(fileName));
-
-#if !FX45
-            streamsRO = new ReadOnlyCollection<IAviStream>(streamsList);
-#endif
+            Argument.IsNotNullOrEmpty(fileName, nameof(fileName));
 
             var fileStream = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024);
             fileWriter = new BinaryWriter(fileStream);
@@ -74,16 +57,10 @@ namespace SharpAvi.Output
         /// <param name="leaveOpen">Whether to leave the stream open when closing <see cref="AviWriter"/>.</param>
         public AviWriter(Stream stream, bool leaveOpen = false)
         {
-            Contract.Requires(stream.CanWrite);
-            Contract.Requires(stream.CanSeek);
+            Argument.Meets(stream.CanWrite, nameof(stream), "A stream is not writeable.");
+            Argument.Meets(stream.CanSeek, nameof(stream), "A stream is not seekable.");
 
-#if FX45
             fileWriter = new BinaryWriter(stream, Encoding.Default, leaveOpen);
-#else
-            fileWriter = new BinaryWriter(stream);
-            closeWriter = !leaveOpen;
-            streamsRO = new ReadOnlyCollection<IAviStream>(streamsList);
-#endif
 
         }
 
@@ -92,12 +69,15 @@ namespace SharpAvi.Output
         /// The value of the property is rounded to 3 fractional digits.
         /// Default value is <c>1</c>.
         /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// Already started to write frames hence this information cannot be changed.
+        /// </exception>
         public decimal FramesPerSecond
         {
             get { return framesPerSecond; }
             set
             {
-                Contract.Requires(value > 0);
+                Argument.IsPositive(value, nameof(value));
 
                 lock (syncWrite)
                 {
@@ -118,6 +98,9 @@ namespace SharpAvi.Output
         /// Presence of v1 index may improve the compatibility of generated AVI files with certain software, 
         /// especially when there are multiple streams.
         /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// Already started to write frames hence this information cannot be changed.
+        /// </exception>
         public bool EmitIndex1
         {
             get { return emitIndex1; }
@@ -132,18 +115,42 @@ namespace SharpAvi.Output
         }
         private bool emitIndex1;
 
+        /// <summary>
+        /// The maximum number of super index entries.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This number should be known before writing starts because the space for
+        /// super-index entries is reserved in the file header.
+        /// It effectively limits the number of frames which can be written to an individual stream.
+        /// Each super-index entry points to a single index block which can reference up to <c>15,000</c> frames.
+        /// </para>
+        /// <para>
+        /// The default value is <c>256</c>. For a 60 frames/s video stream this is equivalent to a duration
+        /// of more than 17 hours.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// Already started to write frames hence this information cannot be changed.
+        /// </exception>
+        public int MaxSuperIndexEntries
+        {
+            get { return maxSuperIndexEntries; }
+            set 
+            {
+                Argument.IsPositive(value, nameof(value));
+
+                lock (syncWrite)
+                {
+                    CheckNotStartedWriting();
+                    maxSuperIndexEntries = value;
+                }
+            }
+        }
+        private int maxSuperIndexEntries = 256;
+
         /// <summary>AVI streams that have been added so far.</summary>
-#if FX45
-        public IReadOnlyList<IAviStream> Streams
-        {
-            get { return streams; }
-        }
-#else
-        public ReadOnlyCollection<IAviStream> Streams
-        {
-            get { return streamsRO; }
-        }
-#endif
+        public IReadOnlyList<IAviStream> Streams => streams;
 
         /// <summary>Adds new video stream.</summary>
         /// <param name="width">Frame's width.</param>
@@ -157,11 +164,9 @@ namespace SharpAvi.Output
         /// </remarks>
         public IAviVideoStream AddVideoStream(int width = 1, int height = 1, BitsPerPixel bitsPerPixel = BitsPerPixel.Bpp32)
         {
-            Contract.Requires(width > 0);
-            Contract.Requires(height > 0);
-            Contract.Requires(Enum.IsDefined(typeof(BitsPerPixel), bitsPerPixel));
-            Contract.Requires(Streams.Count < 100);
-            Contract.Ensures(Contract.Result<IAviVideoStream>() != null);
+            Argument.IsPositive(width, nameof(width));
+            Argument.IsPositive(height, nameof(height));
+            Argument.IsEnumMember(bitsPerPixel, nameof(bitsPerPixel));
 
             return AddStream<IAviVideoStreamInternal>(index => 
                 {
@@ -193,9 +198,9 @@ namespace SharpAvi.Output
         /// </remarks>
         public IAviVideoStream AddEncodingVideoStream(IVideoEncoder encoder, bool ownsEncoder = true, int width = 1, int height = 1)
         {
-            Contract.Requires(encoder != null);
-            Contract.Requires(Streams.Count < 100);
-            Contract.Ensures(Contract.Result<IAviVideoStream>() != null);
+            Argument.IsNotNull(encoder, nameof(encoder));
+            Argument.IsPositive(width, nameof(width));
+            Argument.IsPositive(height, nameof(height));
 
             return AddStream<IAviVideoStreamInternal>(index => 
                 {
@@ -218,11 +223,10 @@ namespace SharpAvi.Output
         /// </remarks>
         public IAviAudioStream AddAudioStream(int channelCount = 1, int samplesPerSecond = 44100, int bitsPerSample = 16)
         {
-            Contract.Requires(channelCount > 0);
-            Contract.Requires(samplesPerSecond > 0);
-            Contract.Requires(bitsPerSample > 0 && (bitsPerSample % 8) == 0);
-            Contract.Requires(Streams.Count < 100);
-            Contract.Ensures(Contract.Result<IAviAudioStream>() != null);
+            Argument.IsPositive(channelCount, nameof(channelCount));
+            Argument.IsPositive(samplesPerSecond, nameof(samplesPerSecond));
+            Argument.IsPositive(bitsPerSample, nameof(bitsPerSample));
+            Argument.Meets(bitsPerSample % 8 == 0, nameof(bitsPerSample), "A multiple of 8 is expected.");
 
             return AddStream<IAviAudioStreamInternal>(index => 
                 {
@@ -253,9 +257,7 @@ namespace SharpAvi.Output
         /// </remarks>
         public IAviAudioStream AddEncodingAudioStream(IAudioEncoder encoder, bool ownsEncoder = true)
         {
-            Contract.Requires(encoder != null);
-            Contract.Requires(Streams.Count < 100);
-            Contract.Ensures(Contract.Result<IAviAudioStream>() != null);
+            Argument.IsNotNull(encoder, nameof(encoder));
 
             return AddStream<IAviAudioStreamInternal>(index => 
                 {
@@ -269,8 +271,8 @@ namespace SharpAvi.Output
         private TStream AddStream<TStream>(Func<int, TStream> streamFactory)
             where TStream : IAviStreamInternal
         {
-            Contract.Requires(streamFactory != null);
-            Contract.Requires(Streams.Count < 100);
+            if (Streams.Count >= 100)
+                throw new InvalidOperationException("Cannot add more streams.");
 
             lock (syncWrite)
             {
@@ -278,11 +280,7 @@ namespace SharpAvi.Output
                 CheckNotStartedWriting();
 
                 var stream = streamFactory.Invoke(Streams.Count);
-#if FX45
                 streams.Add(stream);
-#else
-                streamsList.Add(stream);
-#endif
                 return stream;
             }
         }
@@ -325,18 +323,7 @@ namespace SharpAvi.Output
                         WriteHeader();
                     }
 
-#if FX45
                     fileWriter.Close();
-#else
-                    if (closeWriter)
-                    {
-                        fileWriter.Close();
-                    }
-                    else
-                    {
-                        fileWriter.Flush();
-                    }
-#endif
                     isClosed = true;
                 }
 
@@ -347,10 +334,7 @@ namespace SharpAvi.Output
             }
         }
 
-        void IDisposable.Dispose()
-        {
-            Close();
-        }
+        void IDisposable.Dispose() => Close();
 
         private void CheckNotStartedWriting()
         {
@@ -422,19 +406,27 @@ namespace SharpAvi.Output
         }
 
 
-        #region IAviStreamDataHandler implementation
+        #region IAviStreamWriteHandler implementation
 
+#if NET5_0_OR_GREATER
+        void IAviStreamWriteHandler.WriteVideoFrame(AviVideoStream stream, bool isKeyFrame, ReadOnlySpan<byte> frameData) 
+            => WriteStreamFrame(stream, isKeyFrame, frameData);
+
+        void IAviStreamWriteHandler.WriteAudioBlock(AviAudioStream stream, ReadOnlySpan<byte> blockData)
+            => WriteStreamFrame(stream, true, blockData);
+#else
         void IAviStreamWriteHandler.WriteVideoFrame(AviVideoStream stream, bool isKeyFrame, byte[] frameData, int startIndex, int count)
-        {
-            WriteStreamFrame(stream, isKeyFrame, frameData, startIndex, count);
-        }
+            => WriteStreamFrame(stream, isKeyFrame, frameData, startIndex, count);
 
         void IAviStreamWriteHandler.WriteAudioBlock(AviAudioStream stream, byte[] blockData, int startIndex, int count)
-        {
-            WriteStreamFrame(stream, true, blockData, startIndex, count);
-        }
+            => WriteStreamFrame(stream, true, blockData, startIndex, count);
+#endif
 
+#if NET5_0_OR_GREATER
+        private void WriteStreamFrame(AviStreamBase stream, bool isKeyFrame, ReadOnlySpan<byte> frameData)
+#else
         private void WriteStreamFrame(AviStreamBase stream, bool isKeyFrame, byte[] frameData, int startIndex, int count)
+#endif
         {
             lock (syncWrite)
             {
@@ -446,27 +438,34 @@ namespace SharpAvi.Output
                 }
 
                 var si = streamsInfo[stream.Index];
-                if (si.SuperIndex.Count == MAX_SUPER_INDEX_ENTRIES)
-                {
-                    throw new InvalidOperationException("Cannot write more frames to this stream.");
-                }
-
                 if (ShouldFlushStreamIndex(si.StandardIndex))
                 {
                     FlushStreamIndex(stream);
                 }
+                if (si.SuperIndex.Count == maxSuperIndexEntries)
+                {
+                    throw new InvalidOperationException("Cannot write more frames to this stream.");
+                }
 
                 var shouldCreateIndex1Entry = emitIndex1 && isFirstRiff;
+
+#if NET5_0_OR_GREATER
+                var count = frameData.Length;
+#endif
 
                 CreateNewRiffIfNeeded(count + (shouldCreateIndex1Entry ? INDEX1_ENTRY_SIZE : 0));
 
                 var chunk = fileWriter.OpenChunk(stream.ChunkId, count);
+#if NET5_0_OR_GREATER
+                fileWriter.Write(frameData);
+#else
                 fileWriter.Write(frameData, startIndex, count);
+#endif
                 fileWriter.CloseItem(chunk);
 
                 si.OnFrameWritten(chunk.DataSize);
                 var dataSize = (uint)chunk.DataSize;
-                // Set highest bit for non-key frames according to the OpenDML spec
+                // Set the highest bit for non-key frames according to the OpenDML spec
                 if (!isKeyFrame)
                 {
                     dataSize |= 0x80000000U;
@@ -545,14 +544,17 @@ namespace SharpAvi.Output
             fileWriter.Write((short)1); // planes
             fileWriter.Write((ushort)videoStream.BitsPerPixel); // bits per pixel
             fileWriter.Write((uint)videoStream.Codec); // compression (codec FOURCC)
-            var sizeInBytes = videoStream.Width * videoStream.Height * (((int)videoStream.BitsPerPixel) / 8);
+            // 0 size is safer for uncompressed formats not to bother with stride calculation
+            var sizeInBytes = videoStream.Codec == CodecIds.Uncompressed
+                ? 0
+                : videoStream.Width * videoStream.Height * (((int)videoStream.BitsPerPixel) / 8);
             fileWriter.Write((uint)sizeInBytes); // image size in bytes
             fileWriter.Write(0); // X pixels per meter
             fileWriter.Write(0); // Y pixels per meter
 
             // Writing grayscale palette for 8-bit uncompressed stream
             // Otherwise, no palette
-            if (videoStream.BitsPerPixel == BitsPerPixel.Bpp8 && videoStream.Codec == KnownFourCCs.Codecs.Uncompressed)
+            if (videoStream.BitsPerPixel == BitsPerPixel.Bpp8 && videoStream.Codec == CodecIds.Uncompressed)
             {
                 fileWriter.Write(256U); // palette colors used
                 fileWriter.Write(0U); // palette colors important
@@ -611,7 +613,7 @@ namespace SharpAvi.Output
 
         private void WriteJunkInsteadOfMissingSuperIndexEntries()
         {
-            var missingEntriesCount = streamsInfo.Sum(si => MAX_SUPER_INDEX_ENTRIES - si.SuperIndex.Count);
+            var missingEntriesCount = streamsInfo.Sum(si => maxSuperIndexEntries - si.SuperIndex.Count);
             if (missingEntriesCount > 0)
             {
                 var junkDataSize = missingEntriesCount * sizeof(uint) * 4 - RiffItem.ITEM_HEADER_SIZE;
