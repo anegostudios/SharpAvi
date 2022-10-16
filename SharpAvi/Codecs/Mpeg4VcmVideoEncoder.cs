@@ -131,7 +131,7 @@ namespace SharpAvi.Codecs
 
         private readonly int width;
         private readonly int height;
-        private readonly byte[] sourceBuffer;
+        private byte[] sourceBuffer;
         private readonly VfwApi.BitmapInfoHeader inBitmapInfo;
         private readonly VfwApi.BitmapInfoHeader outBitmapInfo;
         private readonly IntPtr compressorHandle;
@@ -145,7 +145,6 @@ namespace SharpAvi.Codecs
         private int framesFromLastKey;
         private bool isDisposed;
         private bool needEnd;
-        private bool flipVertical = true;
 
         /// <summary>
         /// Creates a new instance of <see cref="Mpeg4VcmVideoEncoder"/>.
@@ -303,11 +302,7 @@ namespace SharpAvi.Codecs
         /// <summary>
         /// Whether to vertically flip the frame before writing
         /// </summary>
-        public bool FlipVertical
-        {
-            get { return flipVertical;}
-            set { flipVertical = value; }
-        }
+        public bool FlipVertical { get; set; }
 
         /// <summary>Encodes a frame.</summary>
         public int EncodeFrame(byte[] source, int srcOffset, byte[] destination, int destOffset, out bool isKeyFrame)
@@ -318,25 +313,20 @@ namespace SharpAvi.Codecs
                 "Source end offset exceeds the source length.");
             Argument.IsNotNull(destination, nameof(destination));
             Argument.IsNotNegative(destOffset, nameof(destOffset));
-            
-            if (flipVertical)
+#if NET5_0_OR_GREATER
+            return EncodeFrame(source.AsSpan(srcOffset), destination.AsSpan(destOffset), out isKeyFrame);
+#else
+            if (FlipVertical)
             {
                 if (sourceBuffer == null)
                 {
                     sourceBuffer = new byte[width * height * 4];
                 }
                 BitmapUtils.FlipVertical(source, srcOffset, sourceBuffer, 0, height, width * 4);
-            } else
-            {
-                sourceBuffer = source;
+                source = sourceBuffer;
             }
-            
-#if NET5_0_OR_GREATER
-            return EncodeFrame(source.AsSpan(srcOffset), destination.AsSpan(destOffset), out isKeyFrame);
-#else
-            BitmapUtils.FlipVertical(source, srcOffset, sourceBuffer, 0, height, width * 4);
 
-            var sourceHandle = GCHandle.Alloc(sourceBuffer, GCHandleType.Pinned);
+            var sourceHandle = GCHandle.Alloc(source, GCHandleType.Pinned);
             var encodedHandle = GCHandle.Alloc(destination, GCHandleType.Pinned);
             try
             {
@@ -360,8 +350,16 @@ namespace SharpAvi.Codecs
             Argument.ConditionIsMet(4 * width * height <= source.Length,
                 "Source end offset exceeds the source length.");
 
-            BitmapUtils.FlipVertical(source, sourceBuffer, height, width * 4);
-            fixed (void* srcPtr = sourceBuffer, destPtr = destination)
+            if (FlipVertical)
+            {
+                if (sourceBuffer == null)
+                {
+                    sourceBuffer = new byte[width * height * 4];
+                }
+                BitmapUtils.FlipVertical(source, sourceBuffer, height, width * 4);
+                source = sourceBuffer;
+            }
+            fixed (void* srcPtr = source, destPtr = destination)
             {
                 var srcIntPtr = new IntPtr(srcPtr);
                 var destIntPtr = new IntPtr(destPtr);

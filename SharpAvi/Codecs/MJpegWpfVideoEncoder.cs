@@ -1,5 +1,4 @@
-﻿#if NET45 || NET5_0_OR_GREATER && WINDOWS
-using SharpAvi.Format;
+﻿#if NET5_0_OR_GREATER && WINDOWS
 using SharpAvi.Utilities;
 using System;
 using System.IO;
@@ -73,6 +72,8 @@ namespace SharpAvi.Codecs
                 return Math.Max(rect.Width * rect.Height * 3, 1024);
             }
         }
+
+        public bool FlipVertical { get; set; }
 
         /// <summary>
         /// Encodes a frame.

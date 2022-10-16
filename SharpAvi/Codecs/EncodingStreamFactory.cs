@@ -25,7 +25,7 @@ namespace SharpAvi.Codecs
             return writer.AddEncodingVideoStream(encoder, true, width, height);
         }
 
-#if NET45 || NET5_0_OR_GREATER && WINDOWS
+#if NET5_0_OR_GREATER && WINDOWS
         /// <summary>
         /// Adds new video stream with <see cref="MJpegWpfVideoEncoder"/>.
         /// </summary>

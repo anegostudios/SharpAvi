@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net45;netstandard2.0;net50;net50-windows</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;net60;net60-windows</TargetFrameworks>
     <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
     <OutputType>Library</OutputType>
   </PropertyGroup>
@@ -40,19 +40,9 @@
   <ItemGroup>
     <None Include="..\.editorconfig" Link=".editorconfig" />
   </ItemGroup>
-  <!-- References to WPF for targets on the Windows platform -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net45'">
-    <Reference Include="PresentationCore" />
-    <Reference Include="System.Windows" />
-    <Reference Include="WindowsBase" />
-  </ItemGroup>
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net50-windows'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net60-windows'">
     <UseWPF>true</UseWPF>
   </PropertyGroup>
-  <!-- LameFacadeImpl is compiled in runtime from an embedded resource on .NET 4.5 -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net45'">
-    <EmbeddedResource Include="Codecs\Mp3LameAudioEncoder.LameFacadeImpl.cs" />
-  </ItemGroup>
   <ItemGroup>
     <None Update="readme.Context.tt">
       <Generator>TextTemplatingFileGenerator</Generator>

@@ -17,6 +17,7 @@ namespace SharpAvi.Codecs
         private readonly int width;
         private readonly int height;
         private readonly JpegEncoder jpegEncoder;
+        private byte[] sourceBuffer;
 #if NET5_0_OR_GREATER
         private readonly MemoryStream buffer;
 #endif
@@ -42,6 +43,7 @@ namespace SharpAvi.Codecs
 #if NET5_0_OR_GREATER
             buffer = new MemoryStream(MaxEncodedSize);
 #endif
+
             jpegEncoder = new JpegEncoder()
             {
                 Quality = quality
@@ -61,6 +63,8 @@ namespace SharpAvi.Codecs
         /// </summary>
         public int MaxEncodedSize => Math.Max(width * height * 3, 1024);
 
+        public bool FlipVertical { get; set; }
+
         /// <summary>
         /// Encodes a frame.
         /// </summary>
@@ -77,6 +81,22 @@ namespace SharpAvi.Codecs
             using (var stream = new MemoryStream(destination))
             {
                 stream.Position = destOffset;
+                if (FlipVertical)
+                {
+                    if (sourceBuffer == null)
+                    {
+                        sourceBuffer = new byte[width * height * 4];
+                    }
+#if NET5_0_OR_GREATER
+                    BitmapUtils.FlipVertical(source, sourceBuffer, height, width * 4);
+#else
+                    BitmapUtils.FlipVertical(source, srcOffset, sourceBuffer, 0, height, width * 4);
+#endif
+                }
+                else
+                {
+                    sourceBuffer = source;
+                }
                 length = LoadAndEncodeImage(source.AsSpan(srcOffset), stream);
             }
 

@@ -15,7 +15,7 @@ namespace SharpAvi.Codecs
         private readonly int width;
         private readonly int height;
         private readonly int stride;
-        private bool flipVertical = true;
+        private byte[] sourceBuffer;
 
         /// <summary>
         /// Creates a new instance of <see cref="UncompressedVideoEncoder"/>.
@@ -51,11 +51,7 @@ namespace SharpAvi.Codecs
         /// <summary>
         /// Whether to vertically flip the frame before writing
         /// </summary>
-        public bool FlipVertical
-        {
-            get { return flipVertical; }
-            set { flipVertical = value; }
-        }
+        public bool FlipVertical { get; set; }
 
         /// <summary>
         /// Encodes a frame.
@@ -72,20 +68,18 @@ namespace SharpAvi.Codecs
 #if NET5_0_OR_GREATER
             return EncodeFrame(source.AsSpan(srcOffset), destination.AsSpan(destOffset), out isKeyFrame);
 #else
-            if (flipVertical)
+            if (FlipVertical)
             {
-                if (source == null)
+                if (sourceBuffer == null)
                 {
-                    source = new byte[width * height * 4];
+                    sourceBuffer = new byte[width * height * 4];
                 }
-                BitmapUtils.FlipVertical(source, srcOffset, destination, 0, height, width * 4);
-            }
-            else
-            {
-                destination = source;
+                sourceBuffer = new byte[width * height * 4];
+                BitmapUtils.FlipVertical(source, srcOffset, sourceBuffer, 0, height, width * 4);
+                source = sourceBuffer;
             }
 
-            BitmapUtils.Bgr32ToBgr24(sourceBuffer, 0, destination, destOffset, width * height);
+            BitmapUtils.Bgr32ToBgr24(source, srcOffset, destination, 0, width * height);
 
             isKeyFrame = true;
             return MaxEncodedSize;
